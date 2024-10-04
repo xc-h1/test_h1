@@ -21,15 +21,11 @@ jobs:
         with:
           python-version: '3.x'
 
-      # Step 3: Install necessary Python modules
-      - name: Install Python zipfile
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install zipfile36
-
-      # Step 4: Use Python to process 10 files per cycle
+      # Step 3: Use Python to process 10 files per cycle
       - name: Unzip and commit 10 files at a time with Python
+        shell: bash
         run: |
+          python - <<'EOF'
           import zipfile
           import os
           import time
@@ -90,7 +86,9 @@ jobs:
                           file_batch.clear()
                           time.sleep(1)
 
-      # Step 5: Clean up
+          EOF
+
+      # Step 4: Clean up
       - name: Clean up
         run: |
           rm -rf extracted_files
