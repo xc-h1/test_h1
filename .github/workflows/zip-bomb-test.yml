@@ -11,17 +11,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Step 2: Install Python (should be pre-installed in most runners)
       - name: Set up Python environment
         uses: actions/setup-python@v2
         with:
           python-version: '3.x'
 
-      # Step 3: Use Python to process 10 files per cycle
       - name: Unzip and commit 10 files at a time with Python
         shell: bash
         run: |
@@ -47,48 +44,55 @@ jobs:
 
               # Process 10 files at a time
               for index, file in enumerate(all_files):
-                  if file.startswith('assets/'):
-                      print(f"Preparing {file} for extraction...")
-                      file_batch.append(file)
+                  # Skip directories and only process files
+                  if file.endswith('/'):
+                      print(f"Skipping directory: {file}")
+                      continue
 
-                      # When we reach a batch size of 10, extract and commit them
-                      if len(file_batch) == batch_size or index == len(all_files) - 1:
-                          print(f"Processing batch of {len(file_batch)} files: {file_batch}")
+                  print(f"Preparing {file} for extraction...")
+                  file_batch.append(file)
 
-                          # Extract each file in the batch
-                          for f in file_batch:
-                              try:
-                                  zip_ref.extract(f, extraction_dir)
-                                  print(f"Extracted {f}")
-                              except Exception as e:
-                                  print(f"Failed to extract {f}: {str(e)}")
+                  # When we reach a batch size of 10, extract and commit them
+                  if len(file_batch) == batch_size or index == len(all_files) - 1:
+                      print(f"Processing batch of {len(file_batch)} files: {file_batch}")
 
-                          # Commit and push each file
-                          for extracted_file in file_batch:
-                              extracted_file_path = os.path.join(extraction_dir, extracted_file)
-                              if os.path.exists(extracted_file_path):
-                                  # Set up Git config
-                                  subprocess.run(['git', 'config', '--global', 'user.name', 'github-actions[bot]'])
-                                  subprocess.run(['git', 'config', '--global', 'user.email', 'github-actions[bot]@users.noreply.github.com'])
+                      # Extract each file in the batch
+                      for f in file_batch:
+                          try:
+                              zip_ref.extract(f, extraction_dir)
+                              print(f"Extracted {f}")
+                          except zipfile.BadZipFile:
+                              print(f"Failed to extract {f}: Bad ZIP file or potential zip bomb.")
+                          except IsADirectoryError:
+                              print(f"Skipping directory {f}")
+                          except Exception as e:
+                              print(f"Failed to extract {f}: {str(e)}")
 
-                                  # Add and commit the file
-                                  subprocess.run(['git', 'add', extracted_file_path])
-                                  subprocess.run(['git', 'commit', '-m', f'Add extracted file: {extracted_file}'])
-                                  subprocess.run(['git', 'push'])
+                      # Commit and push each file
+                      for extracted_file in file_batch:
+                          extracted_file_path = os.path.join(extraction_dir, extracted_file)
+                          if os.path.exists(extracted_file_path):
+                              # Set up Git config
+                              subprocess.run(['git', 'config', '--global', 'user.name', 'github-actions[bot]'])
+                              subprocess.run(['git', 'config', '--global', 'user.email', 'github-actions[bot]@users.noreply.github.com'])
 
-                                  # Remove the file after pushing
-                                  os.remove(extracted_file_path)
-                                  print(f"Deleted {extracted_file_path}")
-                              else:
-                                  print(f"{extracted_file_path} not found after extraction.")
+                              # Add and commit the file
+                              subprocess.run(['git', 'add', extracted_file_path])
+                              subprocess.run(['git', 'commit', '-m', f'Add extracted file: {extracted_file}'])
+                              subprocess.run(['git', 'push'])
+
+                              # Remove the file after pushing
+                              os.remove(extracted_file_path)
+                              print(f"Deleted {extracted_file_path}")
+                          else:
+                              print(f"{extracted_file_path} not found after extraction.")
                           
-                          # Clear the batch and wait before the next cycle
-                          file_batch.clear()
-                          time.sleep(1)
+                      # Clear the batch and wait before the next cycle
+                      file_batch.clear()
+                      time.sleep(1)
 
           EOF
 
-      # Step 4: Clean up
       - name: Clean up
         run: |
           rm -rf extracted_files
