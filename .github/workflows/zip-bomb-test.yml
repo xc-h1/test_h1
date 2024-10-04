@@ -14,9 +14,6 @@ jobs:
       # Step 1: Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          # Explicitly use Node.js 20 for this action to avoid deprecation warnings
-          node-version: '20.x'
 
       # Step 2: Install unzip utility
       - name: Install unzip
@@ -34,67 +31,79 @@ jobs:
             exit 1
           fi
 
-      # Step 4: Unzip and commit files in batches of 10
-      - name: Unzip and commit files in batches of 10
+      # Step 4: Unzip and commit 10 files at a time
+      - name: Unzip and commit 10 files at a time
         run: |
+          # Initialize a counter
+          counter=0
           batch_size=10
-          count=0
-          files_to_process=()
-          
-          # Read the file list
+          file_batch=()
+
+          # Process 10 files at a time
           while IFS= read -r line; do
             # Extract the file name from the line
             file=$(echo "$line" | awk '{print $NF}')
 
             # Only process files that start with 'assets/'
             if [[ $file == assets/* ]]; then
-              files_to_process+=("$file")
-              ((count++))
+              echo "Preparing $file for extraction..."
+              file_batch+=("$file")
+              counter=$((counter + 1))
 
-              # Process batch when we reach 10 files
-              if [ "$count" -eq "$batch_size" ]; then
-                echo "Processing batch of 10 files..."
+              # If we've collected 10 files, extract and commit them
+              if [ $counter -eq $batch_size ]; then
+                echo "Processing batch of 10 files: ${file_batch[*]}"
 
-                # Unzip the batch of files
-                for file in "${files_to_process[@]}"; do
-                  echo "Extracting $file..."
-                  unzip -o zbbig2.zip "$file" && echo "$file extracted successfully." || echo "Failed to extract $file"
+                # Extract the batch of 10 files
+                unzip -o zbbig2.zip "${file_batch[@]}" || { echo "Failed to extract files"; exit 1; }
+
+                # Commit and push each file in the batch
+                for extracted_file in "${file_batch[@]}"; do
+                  if [ -f "$extracted_file" ]; then
+                    echo "Adding $extracted_file to Git"
+
+                    # Set up Git user for committing
+                    git config --global user.name 'github-actions[bot]'
+                    git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+                    # Commit the file
+                    git add "$extracted_file"
+                    git commit -m "Add extracted file: $extracted_file"
+                    git push || echo "Push failed for $extracted_file"
+
+                    # Delete the file after pushing
+                    rm "$extracted_file" || echo "Failed to delete $extracted_file"
+                  else
+                    echo "$extracted_file not found after extraction."
+                  fi
                 done
 
-                # Commit and push the batch of files
-                git config --global user.name 'github-actions[bot]'
-                git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-                git add "${files_to_process[@]}"
-                git commit -m "Add batch of extracted files: ${files_to_process[*]}"
-                git push || echo "Push failed"
+                # Reset for the next batch
+                file_batch=()
+                counter=0
 
-                # Clean up the batch
-                rm -f "${files_to_process[@]}" || echo "Failed to delete files after push"
-                
-                # Reset the batch for the next 10 files
-                count=0
-                files_to_process=()
+                # Sleep for 1 second before processing the next batch
                 sleep 1
               fi
             fi
           done < file_list.txt
 
-          # Process any remaining files that are less than 10
-          if [ "${#files_to_process[@]}" -gt 0 ]; then
-            echo "Processing remaining files..."
+          # Process remaining files if there are fewer than 10 left
+          if [ ${#file_batch[@]} -gt 0 ]; then
+            echo "Processing remaining files: ${file_batch[*]}"
+            unzip -o zbbig2.zip "${file_batch[@]}" || { echo "Failed to extract remaining files"; exit 1; }
 
-            for file in "${files_to_process[@]}"; do
-              echo "Extracting $file..."
-              unzip -o zbbig2.zip "$file" && echo "$file extracted successfully." || echo "Failed to extract $file"
+            for extracted_file in "${file_batch[@]}"; do
+              if [ -f "$extracted_file" ]; then
+                echo "Adding $extracted_file to Git"
+                git add "$extracted_file"
+                git commit -m "Add extracted file: $extracted_file"
+                git push || echo "Push failed for $extracted_file"
+                rm "$extracted_file" || echo "Failed to delete $extracted_file"
+              else
+                echo "$extracted_file not found after extraction."
+              fi
             done
-
-            git config --global user.name 'github-actions[bot]'
-            git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-            git add "${files_to_process[@]}"
-            git commit -m "Add remaining extracted files: ${files_to_process[*]}"
-            git push || echo "Push failed"
-
-            rm -f "${files_to_process[@]}" || echo "Failed to delete files after push"
           fi
 
       # Step 5: Clean up
