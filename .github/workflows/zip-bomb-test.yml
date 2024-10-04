@@ -1,0 +1,99 @@
+name: Zip Bomb Upload Workflow
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  unzip-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Install unzip utility
+      - name: Install unzip
+        run: sudo apt-get install -y unzip
+
+      # Step 3: List files in the ZIP
+      - name: List files in ZIP
+        id: list_files
+        run: |
+          if unzip -l zbbig2.zip > file_list.txt; then
+            echo "Files listed successfully."
+            cat file_list.txt
+          else
+            echo "Failed to list files in zip."
+            exit 1
+          fi
+
+      # Step 4: Unzip and commit files in batches of 10
+      - name: Unzip and commit files in batches of 10
+        run: |
+          batch_size=10
+          count=0
+          files_to_process=()
+          
+          # Read the file list
+          while IFS= read -r line; do
+            # Extract the file name from the line
+            file=$(echo "$line" | awk '{print $NF}')
+
+            # Only process files that start with 'assets/'
+            if [[ $file == assets/* ]]; then
+              files_to_process+=("$file")
+              ((count++))
+
+              # Process batch when we reach 10 files
+              if [ "$count" -eq "$batch_size" ]; then
+                echo "Processing batch of 10 files..."
+
+                # Unzip the batch of files
+                for file in "${files_to_process[@]}"; do
+                  echo "Extracting $file..."
+                  unzip -o zbbig2.zip "$file" && echo "$file extracted successfully." || echo "Failed to extract $file"
+                done
+
+                # Commit and push the batch of files
+                git config --global user.name 'github-actions[bot]'
+                git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+                git add "${files_to_process[@]}"
+                git commit -m "Add batch of extracted files: ${files_to_process[*]}"
+                git push || echo "Push failed"
+
+                # Clean up the batch
+                rm -f "${files_to_process[@]}" || echo "Failed to delete files after push"
+                
+                # Reset the batch for the next 10 files
+                count=0
+                files_to_process=()
+                sleep 1
+              fi
+            fi
+          done < file_list.txt
+
+          # Process any remaining files that are less than 10
+          if [ "${#files_to_process[@]}" -gt 0 ]; then
+            echo "Processing remaining files..."
+
+            for file in "${files_to_process[@]}"; do
+              echo "Extracting $file..."
+              unzip -o zbbig2.zip "$file" && echo "$file extracted successfully." || echo "Failed to extract $file"
+            done
+
+            git config --global user.name 'github-actions[bot]'
+            git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+            git add "${files_to_process[@]}"
+            git commit -m "Add remaining extracted files: ${files_to_process[*]}"
+            git push || echo "Push failed"
+
+            rm -f "${files_to_process[@]}" || echo "Failed to delete files after push"
+          fi
+
+      # Step 5: Clean up
+      - name: Clean up
+        run: rm file_list.txt
