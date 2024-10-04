@@ -1,4 +1,4 @@
-name: Zip Bomb Upload Workflow
+name: Parallel Zip Bomb Extraction and Commit
 
 on:
   push:
@@ -7,69 +7,48 @@ on:
   workflow_dispatch:
 
 jobs:
-  unzip-and-upload:
+  unzip-and-commit:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        file_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # Run 10 parallel jobs
 
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    # Step 1: Checkout the repository
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      # Step 2: Install unzip utility
-      - name: Install unzip
-        run: sudo apt-get install -y unzip
+    # Step 2: Set up Git user for committing
+    - name: Set up Git user
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-      # Step 3: List files in the ZIP
-      - name: List files in ZIP
-        id: list_files
-        run: |
-          if unzip -l zbbig2.zip > file_list.txt; then
-            echo "Files listed successfully."
-            cat file_list.txt
-          else
-            echo "Failed to list files in zip."
-            exit 1
-          fi
+    # Step 3: Install p7zip for extraction
+    - name: Install 7-Zip
+      run: sudo apt-get install -y p7zip-full
 
-      # Step 4: Unzip and commit files one at a time
-      - name: Unzip and commit files one at a time
-        run: |
-          while IFS= read -r line; do
-            # Extract the file name from the line
-            file=$(echo "$line" | awk '{print $NF}')
+    # Step 4: Extract and commit one file at a time (each parallel job handles one file)
+    - name: Extract one file
+      run: |
+        ulimit -n 65535  # Increase file descriptors limit
+        ulimit -v unlimited  # Allow unlimited virtual memory
 
-            # Only process files that start with 'assets/'
-            if [[ $file == assets/* ]]; then
-              echo "Extracting $file..."
-              if unzip -o zbbig2.zip "$file"; then
-                echo "$file extracted successfully."
+        # List files and extract one based on the matrix index
+        FILE=$(7z l zbbig2.zip | awk '{print $6}' | grep -E '^assets' | sed -n "$((matrix.file_index+1))p")
+        echo "Extracting file: $FILE"
+        7z x zbbig2.zip "$FILE" -oextracted_files || echo "Extraction failed"
+        
+        # Check if file exists after extraction
+        if [ -f "extracted_files/$FILE" ]; then
+          git add "extracted_files/$FILE"
+          git commit -m "Add extracted file $FILE"
+          git push || echo "Push failed"
+          rm -f "extracted_files/$FILE"  # Delete the file after committing
+        else
+          echo "File $FILE was not extracted successfully"
+        fi
 
-                # Check if the file exists after extraction
-                if [ -f "$file" ]; then
-                  # Set up Git user for committing
-                  git config --global user.name 'github-actions[bot]'
-                  git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-
-                  # Commit the file
-                  git add "$file"
-                  git commit -m "Add extracted file: $file"
-                  git push || echo "Push failed"
-
-                  # Delete the file after pushing
-                  rm "$file" || echo "Failed to delete $file"
-                  
-                  # Sleep for 1 second
-                  sleep 1
-                else
-                  echo "$file not found after extraction."
-                fi
-              else
-                echo "Failed to extract $file"
-                exit 1
-              fi
-            fi
-          done < file_list.txt
-
-      # Step 5: Clean up
-      - name: Clean up
-        run: rm file_list.txt
+    # Step 5: Add a delay between extractions to avoid race conditions
+    - name: Sleep for 1 second
+      run: sleep 1
