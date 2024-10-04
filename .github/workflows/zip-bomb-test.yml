@@ -11,88 +11,65 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Python environment
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.x'
+      # Step 2: Install unzip utility
+      - name: Install unzip
+        run: sudo apt-get install -y unzip
 
-      - name: Unzip and commit 10 files at a time with Python
-        shell: bash
+      # Step 3: List files in the ZIP
+      - name: List files in ZIP
+        id: list_files
         run: |
-          python - <<'EOF'
-          import zipfile
-          import os
-          import time
-          import subprocess
+          if unzip -l zbbig2.zip > file_list.txt; then
+            echo "Files listed successfully."
+            cat file_list.txt
+          else
+            echo "Failed to list files in zip."
+            exit 1
+          fi
 
-          # Define the path to the ZIP file and extraction directory
-          zip_path = 'zbbig2.zip'
-          extraction_dir = 'extracted_files'
+      # Step 4: Unzip and commit files one at a time
+      - name: Unzip and commit files one at a time
+        run: |
+          while IFS= read -r line; do
+            # Extract the file name from the line
+            file=$(echo "$line" | awk '{print $NF}')
 
-          # Create the extraction directory if it doesn't exist
-          if not os.path.exists(extraction_dir):
-              os.makedirs(extraction_dir)
+            # Only process files that start with 'assets/'
+            if [[ $file == assets/* ]]; then
+              echo "Extracting $file..."
+              if unzip -o zbbig2.zip "$file"; then
+                echo "$file extracted successfully."
 
-          # Open the ZIP file
-          with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-              all_files = zip_ref.namelist()
-              batch_size = 10
-              file_batch = []
+                # Check if the file exists after extraction
+                if [ -f "$file" ]; then
+                  # Set up Git user for committing
+                  git config --global user.name 'github-actions[bot]'
+                  git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-              # Process 10 files at a time
-              for index, file in enumerate(all_files):
-                  # Skip directories and only process files
-                  if file.endswith('/'):
-                      print(f"Skipping directory: {file}")
-                      continue
+                  # Commit the file
+                  git add "$file"
+                  git commit -m "Add extracted file: $file"
+                  git push || echo "Push failed"
 
-                  print(f"Preparing {file} for extraction...")
-                  file_batch.append(file)
+                  # Delete the file after pushing
+                  rm "$file" || echo "Failed to delete $file"
+                  
+                  # Sleep for 1 second
+                  sleep 1
+                else
+                  echo "$file not found after extraction."
+                fi
+              else
+                echo "Failed to extract $file"
+                exit 1
+              fi
+            fi
+          done < file_list.txt
 
-                  # When we reach a batch size of 10, extract and commit them
-                  if len(file_batch) == batch_size or index == len(all_files) - 1:
-                      print(f"Processing batch of {len(file_batch)} files: {file_batch}")
-
-                      # Extract each file in the batch
-                      for f in file_batch:
-                          try:
-                              zip_ref.extract(f, extraction_dir)
-                              print(f"Extracted {f}")
-                          except zipfile.BadZipFile:
-                              print(f"Failed to extract {f}: Bad ZIP file or potential zip bomb.")
-                          except IsADirectoryError:
-                              print(f"Skipping directory {f}")
-                          except Exception as e:
-                              print(f"Failed to extract {f}: {str(e)}")
-
-                      # Commit and push each file
-                      for extracted_file in file_batch:
-                          extracted_file_path = os.path.join(extraction_dir, extracted_file)
-                          if os.path.exists(extracted_file_path):
-                              # Set up Git config
-                              subprocess.run(['git', 'config', '--global', 'user.name', 'github-actions[bot]'])
-                              subprocess.run(['git', 'config', '--global', 'user.email', 'github-actions[bot]@users.noreply.github.com'])
-
-                              # Add and commit the file
-                              subprocess.run(['git', 'add', extracted_file_path])
-                              subprocess.run(['git', 'commit', '-m', f'Add extracted file: {extracted_file}'])
-                              subprocess.run(['git', 'push'])
-
-                              # Remove the file after pushing
-                              os.remove(extracted_file_path)
-                              print(f"Deleted {extracted_file_path}")
-                          else:
-                              print(f"{extracted_file_path} not found after extraction.")
-                          
-                      # Clear the batch and wait before the next cycle
-                      file_batch.clear()
-                      time.sleep(1)
-
-          EOF
-
+      # Step 5: Clean up
       - name: Clean up
-        run: |
-          rm -rf extracted_files
+        run: rm file_list.txt
