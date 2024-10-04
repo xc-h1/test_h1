@@ -14,6 +14,9 @@ jobs:
       # Step 1: Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          # Explicitly use Node.js 20 for this action to avoid deprecation warnings
+          node-version: '20.x'
 
       # Step 2: Install unzip utility
       - name: Install unzip
